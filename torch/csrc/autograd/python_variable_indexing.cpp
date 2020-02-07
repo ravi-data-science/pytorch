@@ -135,12 +135,12 @@ static inline PyObject* convertToPythonInt(PyObject* obj) {
   return idx;
 }
 
-static inline void traceAndConvertPythonIndexToTensorIndex(const Variable& self, PyObject* obj, bool is_tracing, at::indexing::TensorIndex& tensor_index) {
+static inline at::indexing::TensorIndex traceAndConvertPythonIndexToTensorIndex(const Variable& self, PyObject* obj, bool is_tracing) {
   if (THPUtils_checkLong(obj)) {
     if (is_tracing && THPVariable_Check(obj)) {
       recordSelectTrace(THPVariable_Unpack(obj));
     }
-    tensor_index.set_integer(THPUtils_unpackLong(obj));
+    return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
   } else if (PySlice_Check(obj)) {
     Py_ssize_t start, stop, step;
     if (!THPUtils_unpackSlice(obj, &start, &stop, &step)) {
@@ -151,13 +151,13 @@ static inline void traceAndConvertPythonIndexToTensorIndex(const Variable& self,
       extractTensorsFromSlice(obj, start_tensor, stop_tensor, step_tensor);
       recordSliceTrace(start_tensor, stop_tensor, step_tensor);
     }
-    tensor_index.set_slice({start, stop, step});
+    return at::indexing::TensorIndex({start, stop, step});
   } else if (obj == Py_Ellipsis) {
-    tensor_index.set_ellipsis();
+    return at::indexing::TensorIndex(at::indexing::Ellipsis);
   } else if (obj == Py_None) {
-    tensor_index.set_none();
+    return at::indexing::TensorIndex(at::indexing::None);
   } else if (PyBool_Check(obj)) {
-    tensor_index.set_boolean(obj == Py_True);
+    return at::indexing::TensorIndex(obj == Py_True);
   } else if (THPVariable_Check(obj)) {
     if (is_tracing) {
       Tensor tensor = THPVariable_Unpack(obj);
@@ -166,17 +166,17 @@ static inline void traceAndConvertPythonIndexToTensorIndex(const Variable& self,
         recordSelectTrace(tensor);
       }
     }
-    tensor_index.set_tensor(THPVariable_Unpack(obj));
+    return at::indexing::TensorIndex(THPVariable_Unpack(obj));
   } else if (PySequence_Check(obj)) {
     // TODO: Naughty naughty get out of jail free
     // (Fixing this means I have to fix the call chain though :/)
-    tensor_index.set_tensor(sequenceToVariable(legacyExtractDispatchKey(self), obj));
+    return at::indexing::TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj));
   } else {
     auto idx = convertToPythonInt(obj);
     if (THPVariable_Check(idx)) {
       recordSelectTrace(THPVariable_Unpack(idx));
     }
-    tensor_index.set_integer(THPUtils_unpackLong(convertToPythonInt(obj)));
+    return at::indexing::TensorIndex(THPUtils_unpackLong(idx));
   }
 }
 
@@ -192,11 +192,10 @@ static inline Variable applySlicing(const Variable& self, PyObject* index, varia
   Variable result = self;
   for (int64_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    traceAndConvertPythonIndexToTensorIndex(self, obj, is_tracing, at::indexing::tensor_index_tmp);
     result = at::indexing::handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
       /*original_tensor=*/self,
-      /*index=*/at::indexing::tensor_index_tmp,
+      /*index=*/traceAndConvertPythonIndexToTensorIndex(self, obj, is_tracing),
       /*dim_ptr=*/&dim,
       /*specified_dims_ptr=*/&specified_dims,
       /*real_dim=*/i,
@@ -268,10 +267,9 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     || PySlice_Check(index) \
     || index == Py_Ellipsis \
     || index == Py_None) {
-    traceAndConvertPythonIndexToTensorIndex(self_, index, is_tracing, at::indexing::tensor_index_tmp);
     return wrap(at::indexing::handleSimpleTypesInSingleDimIndexingGet(
       self_,
-      at::indexing::tensor_index_tmp,
+      traceAndConvertPythonIndexToTensorIndex(self_, index, is_tracing),
       /*is_tracing=*/is_tracing));
   }
 
@@ -321,10 +319,9 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     || index == Py_None \
     || index == Py_True \
     || index == Py_False) {
-    traceAndConvertPythonIndexToTensorIndex(self_, index, is_tracing, at::indexing::tensor_index_tmp);
     at::indexing::handleSimpleTypesInSingleDimIndexingSet(
       self_,
-      at::indexing::tensor_index_tmp,
+      traceAndConvertPythonIndexToTensorIndex(self_, index, is_tracing),
       value,
       /*is_tracing=*/is_tracing);
     return 0;
