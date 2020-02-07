@@ -217,17 +217,15 @@ static inline Tensor applySlice(
 }
 
 static inline Tensor applySelect(const Tensor& self, int64_t dim, int64_t index, int64_t real_dim=0) {
-  // TORCH_CHECK_INDEX(
-  //   !(index == 0 && dim == 0 && self.dim() == 0),
-  //   "invalid index of a 0-dim tensor. ",
-  //   "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
-  TORCH_CHECK_INDEX(!(index == 0 && dim == 0 && self.dim() == 0));
+  TORCH_CHECK_INDEX(
+    !(index == 0 && dim == 0 && self.dim() == 0),
+    "invalid index of a 0-dim tensor. ",
+    "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
   int64_t size = self.size(dim);
-  // TORCH_CHECK_INDEX(
-  //   index >= -size && index < size,
-  //   "index ", index, " is out of bounds for dimension ", real_dim, " with size ", size);
-  TORCH_CHECK_INDEX(index >= -size && index < size);
+  TORCH_CHECK_INDEX(
+    index >= -size && index < size,
+    "index ", index, " is out of bounds for dimension ", real_dim, " with size ", size);
 
   // if the index is negative, do not normalize it because that would fix the index
   // on the current tensor size in the tracer.
